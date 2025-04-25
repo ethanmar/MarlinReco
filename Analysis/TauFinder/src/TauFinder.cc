@@ -45,6 +45,37 @@ bool MyEnergySort( ReconstructedParticle *p1, ReconstructedParticle *p2)
   return fabs(p1->getEnergy()) > fabs(p2->getEnergy());
 }
 
+// Function to calculate pseudorapidity (eta)
+double computeEta(const double p[3]) {
+  double pz = p[2];
+  double pt = sqrt(p[0] * p[0] + p[1] * p[1]);
+  return 0.5 *
+         log((sqrt(pt * pt + pz * pz) + pz) / (sqrt(pt * pt + pz * pz) - pz));
+}
+
+// Function to calculate azimuthal angle (phi)
+double computePhi(const double p[3]) { return atan2(p[1], p[0]); }
+
+// Function to compute deltaR between two particles
+double computeDeltaR(const double pvec[3], const double pvec_tau[3]) {
+  double eta1 = computeEta(pvec);
+  double eta2 = computeEta(pvec_tau);
+
+  double phi1 = computePhi(pvec);
+  double phi2 = computePhi(pvec_tau);
+
+  double deltaEta = eta1 - eta2;
+  double deltaPhi = phi1 - phi2;
+
+  // Ensure deltaPhi is within the range [-π, π]
+  if (deltaPhi > M_PI)
+    deltaPhi -= 2 * M_PI;
+  if (deltaPhi < -M_PI)
+    deltaPhi += 2 * M_PI;
+
+  return sqrt(deltaEta * deltaEta + deltaPhi * deltaPhi);
+}
+
 TauFinder::TauFinder() : Processor("TauFinder") 
 {
   // modify processor description
@@ -130,15 +161,39 @@ void TauFinder::init()
 
   rootfile = new TFile((_OutputFile_Signal).c_str (),"RECREATE");
 
-  failtuple=new TNtuple("failtuple","failtuple","minv:Qtr:isoE:mergeTries:minv_neg");
-  
+  anatree = new TTree("anatree", "TTree with information on taufinder process");
+
+  if (anatree == 0) {
+    throw lcio::Exception(" Invalid tree pointer !!! ");
+  }
+  anatree->Branch(("ntau"), &_ntau, ("ntau/I"));
+
+  anatree->Branch(("ngood"), &_ngood, ("ngood/I"));
+  anatree->Branch(("nfailseed"), &_nfail_seed, ("nfailseed/I"));
+  anatree->Branch(("nfailQtrack"), &_nfail_Qtrack, ("nfailQtrack/I"));
+  anatree->Branch(("nrej"), &_nrej, ("nrej/I"));
+
+  anatree->Branch(TString("t_isoE"), _tau_isoE, "t_isoE[ntau]/F");
+  anatree->Branch(TString("t_minv"), _tau_minv, TString("t_minv[ntau]/F"));
+  anatree->Branch(TString("t_pt"), _tau_pt, TString("t_pt[ntau]/F"));
+  anatree->Branch(TString("t_p"), _tau_p, TString("t_p[ntau]/F"));
+  anatree->Branch(TString("t_ene"), _tau_ene, TString("t_ene[ntau]/F"));
+  anatree->Branch(TString("t_phi"), _tau_phi, TString("t_phi[ntau]/F"));
+  anatree->Branch(TString("t_eta"), _tau_eta, TString("t_eta[ntau]/F"));
+  anatree->Branch(TString("t_nQ"), _tau_nQ, TString("t_nQ[ntau]/F"));
+  anatree->Branch(TString("t_nN"), _tau_nN, TString("t_nN[ntau]/F"));
+  anatree->Branch(TString("t_nQN"), _tau_nQN, TString("t_nQN[ntau]/F"));
+  anatree->Branch(TString("t_good"), _tau_good, TString("t_good[ntau]/I"));
+
+  anatree->Branch(("nrej_isoE"), &_nrej_isoE, ("nrej_isoE/I"));
+  anatree->Branch(("nrej_minv"), &_nrej_minv, ("nrej_minv/I"));
+  anatree->Branch(("nrej_nQ"), &_nrej_nQ, ("nrej_nQ/I"));
+  anatree->Branch(("nrej_nQN"), &_nrej_nQN, ("nrej_nQN/I"));
+
+  anatree->Branch(("event_num"), _event_num, ("event_num[ntau]/I"));
 
   _nRun = 0 ;
   _nEvt = 0 ;
-  _fail_minv=0;
-  _fail_minv_neg=0;
-  _fail_Qtr=0;
-  _fail_isoE=0;
   _mergeTries=0;
 }
 
@@ -152,6 +207,16 @@ void TauFinder::processEvent( LCEvent * evt )
 
   // this gets called for every event 
   // usually the working horse ...
+
+  _nrej = 0;
+  _nrej_isoE = 0;
+  _nrej_minv = 0;
+  _nrej_nQ = 0;
+  _nrej_nQN = 0;
+  _ntau = 0;
+  _ngood = 0;
+  _nfail_seed = 0;
+  _nfail_Qtrack = 0;
   
   LCCollection *colRECO;
 
@@ -208,6 +273,19 @@ void TauFinder::processEvent( LCEvent * evt )
   while(Qvector.size() && !finding_done)
     finding_done= FindTau(Qvector,Nvector,tauvec);
 
+  if (tauvec.size() == 0) {
+
+    if (Qvector.size() == 0) {
+      if (_nEvt < coutUpToEv || _nEvt == coutEv)
+        streamlog_out(DEBUG)
+            << "No charged particle found in Evt " << _nEvt << endl;
+      ++_nfail_Qtrack;
+    }
+
+    else
+      ++_nfail_seed;
+  }
+  
   //combine associated particles to tau
   std::vector<std::vector<ReconstructedParticle*> >::iterator iterT=tauvec.begin();
   std::vector<ReconstructedParticleImpl* > tauRecvec;
@@ -251,12 +329,15 @@ void TauFinder::processEvent( LCEvent * evt )
       //check for invariant mass
       if(mass_inv>_minv || mass_inv<-0.001 || chargedtracks>4 || chargedtracks==0)
 	{
-	  if(mass_inv>_minv)
-	    _fail_minv++;
-	  if(mass_inv<-0.001)
-	    _fail_minv_neg++;
-	  if(chargedtracks>4 || chargedtracks==0)
-	    _fail_Qtr++;
+	  if(mass_inv>_minv){
+	    _nrej_minv++;
+	  }
+	  if(mass_inv<-0.001){
+	    _nrej_minv++;
+	  }
+	  if(chargedtracks>4 || chargedtracks==0){
+	    _nrej_nQ++;
+	  }
 
 	  //put those particles into rest group
 	  for(unsigned int tp=0;tp<tau.size();tp++)
@@ -355,12 +436,15 @@ void TauFinder::processEvent( LCEvent * evt )
 		  //failed to merge
 		  if(mass_inv>_minv || mass_inv<-0.001 ||  QTvec[t+erasecount]+QTvec[t2+erasecount]>4)
 		    {
-		      if(mass_inv>_minv)
-			_fail_minv++;
-		      if(mass_inv<-0.001)
-			_fail_minv_neg++;
-		      if(QTvec[t+erasecount]+QTvec[t2+erasecount]>4)
-			_fail_Qtr++;
+		      if(mass_inv>_minv){
+			_nrej_minv++;
+		      }
+		      if(mass_inv<-0.001){
+			_nrej_minv++;
+		      }
+		      if(QTvec[t+erasecount]+QTvec[t2+erasecount]>4){
+       			_nrej_nQ++;
+		      }
 		      
 		      //put those particles into rest group
 		      for(unsigned int tp=0;tp<(*iterC)->getParticles().size();tp++)
@@ -411,6 +495,7 @@ void TauFinder::processEvent( LCEvent * evt )
   delete relationNavigator;
   //test for isolation and too many tracks
   std::vector<ReconstructedParticleImpl*>::iterator iter=tauRecvec.begin();
+  _ntau = tauRecvec.size();
   int erasecount=0;
   for ( unsigned int t=0; t<tauRecvec.size() ; t++ )
     {
@@ -418,14 +503,33 @@ void TauFinder::processEvent( LCEvent * evt )
       double E_iso=0;
       int nparticles=0;
       const double *pvec_tau=tau->getMomentum();
+      const double p_tau =
+        sqrt(pvec_tau[0] * pvec_tau[0] + pvec_tau[1] * pvec_tau[1] +
+             pvec_tau[2] * pvec_tau[2]);
+
+      _tau_nQ[t + erasecount] = QTvec[t + erasecount];
+      _tau_nN[t + erasecount] = NTvec[t + erasecount];
+      _tau_nQN[t + erasecount] = QTvec[t + erasecount] + NTvec[t + erasecount];
+      _tau_ene[t + erasecount] = tau->getEnergy();
+      _tau_p[t + erasecount] = p_tau;
+      _tau_pt[t + erasecount] =
+        sqrt(pvec_tau[0] * pvec_tau[0] + pvec_tau[1] * pvec_tau[1]);
+      _tau_phi[t + erasecount] = TMath::ATan2(pvec_tau[1], pvec_tau[0]);
+      _tau_eta[t + erasecount] =
+        0.5 * TMath::Log((p_tau + pvec_tau[2]) / (p_tau - pvec_tau[2]));
+      ;
+      _tau_minv[t + erasecount] =
+        sqrt(tau->getEnergy() * tau->getEnergy() - p_tau * p_tau);
+      
       //too many particles in tau 
       if(QTvec[t+erasecount]+NTvec[t+erasecount]>10 || QTvec[t+erasecount]>4)
 	{
-	  _fail_Qtr++;
+       	  _nrej_nQ++;
 	  if(_nEvt<coutUpToEv || _nEvt==coutEv)
 	    streamlog_out(DEBUG) <<"Tau "<<tau->getEnergy()
                                  <<": too many particles: "<<QTvec[t+erasecount]<<" "<<NTvec[t+erasecount]<<endl;
-	   //put those particles into rest group
+	  _tau_good[t + erasecount] = 0;
+	  //put those particles into rest group
 	  for(unsigned int tp=0;tp<(*iter)->getParticles().size();tp++)
 	    restcol->addElement((*iter)->getParticles()[tp]);
 	  delete *iter;
@@ -448,13 +552,18 @@ void TauFinder::processEvent( LCEvent * evt )
 	      E_iso+=track->getEnergy();
 	    }
 	}
+
+      _tau_isoE[t + erasecount] = E_iso;
+
+      _event_num[t + erasecount] = _nEvt;
       
       if(E_iso>_isoE)
 	{
-	  _fail_isoE++;
+     	  _nrej_isoE++;
 	  if(_nEvt<coutUpToEv || _nEvt==coutEv)
 	    streamlog_out(DEBUG) <<"Tau "<<tau->getEnergy()
                                  <<": Isolation Energy: "<<E_iso<<" in "<<nparticles<<" particles"<<endl;
+	  _tau_good[t+erasecount] = 0;
 	  //put those particles into rest group
 	  for(unsigned int tp=0;tp<(*iter)->getParticles().size();tp++)
 	    restcol->addElement((*iter)->getParticles()[tp]);
@@ -467,9 +576,13 @@ void TauFinder::processEvent( LCEvent * evt )
 	{
 	  reccol->addElement(tau);  
 	  streamlog_out(DEBUG) << "Tau "<<tau->getEnergy()<<" "<<QTvec[t+erasecount]<<" "<<NTvec[t+erasecount]<<endl;	  
+	  _tau_good[t+erasecount] = 1;
+	  _ngood++;
 	  iter++;
 	}
     }
+
+    _nrej = _nrej_isoE + _nrej_minv + _nrej_nQ + _nrej_nQN;
   
   //put remaining particles into rest group
   for(unsigned int tp=0;tp<Qvector.size();tp++)
@@ -480,6 +593,8 @@ void TauFinder::processEvent( LCEvent * evt )
   evt->addCollection(reccol,_outcol);
   evt->addCollection(restcol,_outcolRest);
   evt->addCollection(relationcol,_colNameTauRecLink);
+
+  anatree->Fill();
   
   _nEvt ++ ;
   
@@ -626,19 +741,9 @@ void TauFinder::check( LCEvent* ) {
 
 
 void TauFinder::end(){ 
-  failtuple->Fill(_fail_minv,_fail_Qtr,_fail_isoE,_mergeTries,_fail_minv_neg);
-
-  streamlog_out( MESSAGE ) << "TauFinder::end()  " << name()
-                           << " processed " << _nEvt << " events in " << _nRun << " runs "
-                           << std::endl;
-  streamlog_out( MESSAGE ) << "Reasons for Failure:   " <<std::endl;
-  streamlog_out( MESSAGE ) << "High invariant mass:     " << _fail_minv<< std::endl;
-  streamlog_out( MESSAGE ) << "Negative invariant mass: " << _fail_minv_neg<< std::endl;
-  streamlog_out( MESSAGE ) << "No or to many tracks:  " << _fail_Qtr<< std::endl;
-  streamlog_out( MESSAGE ) << "No isolation        :  " << _fail_isoE<< std::endl;
-  streamlog_out( MESSAGE ) << "Tried to merge      :  " << _mergeTries<< std::endl;
-
+  anatree->Write();
   rootfile->Write();
+  delete anatree;
   delete rootfile;
  
 

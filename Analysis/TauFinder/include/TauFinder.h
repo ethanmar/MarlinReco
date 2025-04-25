@@ -16,6 +16,7 @@
 using namespace lcio ;
 using namespace marlin ;
 
+#define NTAU_MAX 15000
 
 /** TauFinder processor for marlin.
  * 
@@ -71,15 +72,38 @@ class TauFinder : public Processor {
   float _coneAngle=0.0,_isoAngle=0.0,_isoE=0.0;
   float _D0seedmin=0.0, _D0seedmax=0.0,_minv=0.0;
 
-  int _fail_minv=0.0,_fail_minv_neg=0.0,_fail_Qtr=0.0,_fail_isoE=0.0,_mergeTries=0.0;
+  int _mergeTries=0.0;
   
   TFile *rootfile=NULL;
-  TNtuple *failtuple=NULL;
+  TTree *anatree=NULL;
   
   bool FindTau(std::vector<ReconstructedParticle*> &Qvec,std::vector<ReconstructedParticle*> &Nvec,
 	       std::vector<std::vector<ReconstructedParticle*> > &tauvec);
-  
-} ;
+
+ private:
+  int _ntau{};
+  int _ngood{};
+  int _nfail_seed{};
+  int _nfail_Qtrack{};
+  int _nrej{};
+  int _nrej_isoE{};
+  int _nrej_minv{};
+  int _nrej_nQ{};
+  int _nrej_nQN{};
+
+  float _tau_isoE[NTAU_MAX]{};
+  float _tau_minv[NTAU_MAX]{};
+  float _tau_pt[NTAU_MAX]{};
+  float _tau_p[NTAU_MAX]{};
+  float _tau_ene[NTAU_MAX]{};
+  float _tau_phi[NTAU_MAX]{};
+  float _tau_eta[NTAU_MAX]{};
+  float _tau_nQ[NTAU_MAX]{};
+  float _tau_nN[NTAU_MAX]{};
+  float _tau_nQN[NTAU_MAX]{};
+  int _tau_good[NTAU_MAX]{};
+  int _event_num[NTAU_MAX]{};
+ } ;
 
 #endif
 
