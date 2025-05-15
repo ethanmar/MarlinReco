@@ -1,67 +1,76 @@
-The Taufinder folder contains two processors for Tau finding, the
-_TaJetClustering_ and the _TauFinder_ processors
+# Workflow to Run Tau Reconstruction with TauFinder
+## Compiling Local Versions of PandoraPFA and LCContent
+LCContent and PandoraPFA must be compiled locally in order to run the `TauFinder` reconstruction algorithm.
+### LCContent
+Obtain a local version of LCContent:
 
-See this README for TaJetClustering, see MarlinReco/doc/TauFinder for descriptions of the _TauFinder_ processor.
+- `git clone https://github.com/PandoraPFA/LCContent.git`
 
+- `cd LCContent`
 
-The processor _PrepareRECParticles_ processor can be used to create REC particles directly from MCParticles for testing tau reconstruction on MCTruth.
-The processor _EvaluateTauFinder_ can be used to check the performance of the _TauFinder_ processor.
+Point LCContent to the running version of PandoraPFA:
 
+- In `CMakeLists.txt`, add `set(CMAKE_MODULE_PATH "/opt/spack/opt/spack/linux-almalinux9-x86_64/gcc-11.3.1/pandorapfa-4.8.1-lnq2xrwhmmjsd4hpwetkwsf55rjwbu53/cmakemodules")` above `include(PandoraCMakeSettings)` Note that you may have to find the path to pandorapfa/cmakemodules in your environment.
 
-# TaJetClustering: processor for Tau finder
+Edit where `MacroCheckPackageLibs` and `MacroCheckPackageVersion` are found:
 
--- Simple explanation of TauFinder --
-150708 Taikan Suehara / Kyushu University <suehara@phys.kyushu-u.ac.jp>
+- In `cmake/LCContentConfig.cmake.in` and `cmake/LCPandoraContentConfig.cmake.in`, change `INCLUDE( "@PANDORA_CMAKE_MODULES_PATH@/MacroCheckPackageLibs.cmake")` to `INCLUDE( "MacroCheckPackageLibs")`
 
-mainly targetted to obtain isolated tau from jet environment
+- In `cmake/LCContentConfigVersion.cmake.in` and `cmake/LCPandoraContentConfigVersion.cmake.in`, change `INCLUDE( "@PANDORA_CMAKE_MODULES_PATH@/MacroCheckPackageLibs.cmake")` to `INCLUDE( "MacroCheckPackageLibs")`
 
-Three steps:
-1. Clustering
-2. Primary cut
-3. Cone cut
+Compile the library:
 
-Parameters and default values:
+- `mkdir build && cd build`
 
-0. Collections
-  ```
-    <!--Input PFO collection-->
-    <parameter name="PFOCollection" type="string" lcioInType="ReconstructedParticle">PandoraPFOs </parameter>
-    <!--Tau output collection-->
-    <parameter name="OutputTauCollection" type="string" lcioOutType="ReconstructedParticle">TaJets </parameter>
-    <!--Remained PFO collection not clustered-->
-    <parameter name="RemainPFOCollection" type="string" lcioOutType="ReconstructedParticle">RemainPFOs </parameter>
-  ```
-1. Clustering
-  ```
-    <!--Tau mass for tau clustering [GeV]-->
-    <parameter name="TauMass" type="double">2 </parameter>
-    <!--Allowed cosine angle to be clustered-->
-    <parameter name="TauCosAngle" type="double">0.98 </parameter>
-  ```
-2. Primary cut
-  ```
-    <!-- Skip ANY Primary and Cone cuts if true: should be only used in lepton-only final states! -->
-    <parameter name="NoSelection" type="int">0 </parameter>
+- `cmake -B . -S ../ -DCMAKE_CXX_STANDARD=20 -DCMAKE_INSTALL_PREFIX=$(pwd)/../install`
 
-    <!--Primary cut include IMPLICIT selection of accepting only 1 or 3 tracks in jets:
-              this loosen the counting of low energy tracks-->
-    <parameter name="AcceptFlexibleLowEnergyTrack" type="int">1 </parameter>
-    <!--Minimum jet energy to be accepted as taus-->
-    <parameter name="MinimumJetEnergy" type="double">3 </parameter>
-    <!--Minimum track energy to be accepted as taus-->
-    <parameter name="MinimumTrackEnergy" type="double">2 </parameter>
-    <!--Minimum track energy to be counted-->
-    <parameter name="MinimumTrackEnergyAssoc" type="double">2 </parameter>
-  ```
-3. Cone cut: currently simple 1D cut
-  ```
-    <!-- No cone selection if true -->
-    <parameter name="NoSelection" type="int">0 </parameter>
+- `make -j 4 install`
+### DDMarlinPandora
+Obtain a local version of DDMarlinPandora:
 
-    <!--Minimum cosine angle for cone-->
-    <parameter name="ConeMinCosAngle" type="double">0.9 </parameter>
-    <!--Maximum cosine angle for cone-->
-    <parameter name="ConeMaxCosAngle" type="double">1 </parameter>
-    <!--Energy fraction of cone compared to central-->
-    <parameter name="ConeMaxEnergyFrac" type="double">0.1 </parameter>
-  ```
+- `git clone https://github.com/MuonColliderSoft/DDMarlinPandora.git`
+
+- `cd DDMarlinPandora`
+
+Compile the library:
+
+- `mkdir build && cd build`
+
+- `cmake -B . -S ../ -DCMAKE_CXX_STANDARD=20 -    DCMAKE_INSTALL_PREFIX=$(pwd)/../install -DLCContent_DIR=/<your path   to>/LCContent/install/`
+
+- `make -j 4 install`
+
+Swap your path to `libDDMarlinPandora.so` in `$MARLIN_DLL` (THESE STEP MUST BE REPEATED EACH TIME YOU RUN `TauFinder`):
+
+- `echo $MARLIN_DLL`
+
+- Find the listed path to `libDDMarlinPandora.so` (e.g. `/opt/spack/opt/spack/linux-almalinux9-x86_64/gcc-11.3.1/ddmarlinpandora-0.14-m2wmh6ygxhvoe5jwwioxejbk356mxlvs/lib/libDDMarlinPandora.so`)
+
+- In a text editor, find and replace the current path with `<your path to>/DDMarlinPandora/install/lib/libDDMarlinPandora.so`. Copy the entire new variable.
+
+- Override `$MARLIN_DLL` with the edited version with `export MARLIN_DLL=<paste the edited variable>`
+
+## Compile MarlinReco and Run `TauFinder`
+Compile MarlineReco:
+
+- `cd MarlinReco`
+
+- `mkdir build && cd build`
+
+- `cmake -B . -S ../ -DCMAKE_CXX_STANDARD=20 -DCMAKE_INSTALL_PREFIX=$(pwd)/../install -DLCContent_DIR=/<your path to>/LCContent/install/`
+
+- `make -j 4 install`
+
+Swap your path to `libMarlinReco.so` in `$MARLIN_DLL` (THESE STEP MUST BE REPEATED EACH TIME YOU RUN `TauFinder`):
+
+- `echo $MARLIN_DLL`
+
+- Find the listed path to `libMarlinReco.so` (e.g. `/opt/spack/opt/spack/linux-almalinux9-x86_64/gcc-11.3.1/MarlinReco-0.14-m2wmh6ygxhvoe5jwwioxejbk356mxlvs/lib/libMarlinReco.so`)
+
+- In a text editor, find and replace the current path with `<your path to>/MarlinReco/install/lib/libMarlinReco.so`. Copy the entire new variable.
+
+- Override `$MARLIN_DLL` with the edited version with `export MARLIN_DLL=<paste the edited variable>`
+
+Run `TauFinder`:
+
+- `Marlin --global.LCIOInputFiles="reco_output.slcio" <your path to>/MarlinReco/Analysis/TauFinder/share/MyTauFinder.xml`
