@@ -31,7 +31,7 @@
         <parameter name="RandomSeed" value="1234567890" />
     </global>
 
-    <include ref="../../RecoMCTruthLink/share/MyRecoMCTruthLinker.xml"/>
+    <include ref="/afs/hep.wisc.edu/home/kianian/future_collider/MuColl-TauStudy/MarlinReco/Analysis/RecoMCTruthLink/share/MyRecoMCTruthLinker.xml"/>
 
     <!--==========TAUS============-->
     <processor name="MyTauFinder" type="TauFinder">
